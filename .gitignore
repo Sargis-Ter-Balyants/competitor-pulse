@@ -1,9 +1,5 @@
 node_modules/
 dist/
-
-# local Postgres data from `npm run dev`
-data/
-
 .env
 .env.*
 !.env.example

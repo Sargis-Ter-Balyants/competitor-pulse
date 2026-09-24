@@ -1,32 +1,45 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import fs from "node:fs";
-import path from "node:path";
+import { and, asc, desc, eq, isNull, lt, sql } from "drizzle-orm";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import type { Listing, Snapshot, SummaryStatus } from "../types.js";
+import * as schema from "./schema.js";
+import { competitors, listingCursors, snapshots } from "./schema.js";
 
-const { Pool } = pg;
+type Orm = NodePgDatabase<typeof schema>;
+type Tx = Parameters<Parameters<Orm["transaction"]>[0]>[0];
 
-type SnapshotRow = Listing & {
+export type PendingSummary = Listing & {
   id: number;
-  competitor_id: string;
-  fetched_at: Date | string;
-  changed: boolean;
-  summary: string | null;
-  summary_attempts: number;
+  competitorId: string;
+  summaryAttempts: number;
+  previous: Listing;
+};
+
+const listingColumns = {
+  title: snapshots.title,
+  tagline: snapshots.tagline,
+  price: snapshots.price,
+  description: snapshots.description,
 };
 
 export class Db {
-  private readonly clients = new AsyncLocalStorage<pg.PoolClient>();
+  private readonly transactions = new AsyncLocalStorage<Tx>();
 
-  private constructor(private readonly pool: pg.Pool) {}
+  private constructor(
+    private readonly pool: pg.Pool,
+    private readonly orm: Orm,
+  ) {}
 
-  static async open(connectionString: string, migrationsDir: string, connectTimeoutMs = 15_000): Promise<Db> {
-    const db = new Db(new Pool({ connectionString }));
+  static async open(connectionString: string, migrationsFolder: string, connectTimeoutMs = 15_000): Promise<Db> {
+    const pool = new pg.Pool({ connectionString });
+    const db = new Db(pool, drizzle(pool, { schema }));
     try {
       await db.waitUntilReachable(connectTimeoutMs);
-      await db.migrate(migrationsDir);
+      await migrate(db.orm, { migrationsFolder });
     } catch (error) {
-      await db.close();
+      await pool.end();
       throw error;
     }
     return db;
@@ -36,155 +49,144 @@ export class Db {
     await this.pool.end();
   }
 
-  async transaction<T>(fn: () => Promise<T>): Promise<T> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      const result = await this.clients.run(client, fn);
-      await client.query("COMMIT");
-      return result;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
+  /** Every Db call made inside `fn` joins the same transaction. */
+  transaction<T>(fn: () => Promise<T>): Promise<T> {
+    return this.orm.transaction((tx) => this.transactions.run(tx, fn));
   }
 
   async listCompetitors(): Promise<{ id: string }[]> {
-    const result = await this.query<{ id: string }>("SELECT id FROM competitors ORDER BY created_at, id");
-    return result.rows;
+    return this.q
+      .select({ id: competitors.id })
+      .from(competitors)
+      .orderBy(asc(competitors.createdAt), asc(competitors.id));
   }
 
   async addCompetitor(id: string): Promise<boolean> {
-    const result = await this.query(
-      "INSERT INTO competitors (id, created_at) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
-      [id, new Date().toISOString()],
-    );
-    return result.rowCount === 1;
+    const inserted = await this.q
+      .insert(competitors)
+      .values({ id })
+      .onConflictDoNothing()
+      .returning({ id: competitors.id });
+    return inserted.length === 1;
   }
 
   async removeCompetitor(id: string): Promise<boolean> {
-    const result = await this.query("DELETE FROM competitors WHERE id = $1", [id]);
-    return result.rowCount === 1;
+    const deleted = await this.q.delete(competitors).where(eq(competitors.id, id)).returning({ id: competitors.id });
+    return deleted.length === 1;
   }
 
   async hasCompetitor(id: string): Promise<boolean> {
-    const result = await this.query("SELECT 1 FROM competitors WHERE id = $1", [id]);
-    return result.rowCount === 1;
+    const rows = await this.q.select({ id: competitors.id }).from(competitors).where(eq(competitors.id, id)).limit(1);
+    return rows.length === 1;
   }
 
   async cursor(competitorId: string): Promise<number> {
-    const result = await this.query<{ next_index: number }>(
-      "SELECT next_index FROM listing_cursors WHERE competitor_id = $1",
-      [competitorId],
-    );
-    return result.rows[0]?.next_index ?? 0;
+    const [row] = await this.q
+      .select({ nextIndex: listingCursors.nextIndex })
+      .from(listingCursors)
+      .where(eq(listingCursors.competitorId, competitorId));
+    return row?.nextIndex ?? 0;
   }
 
   async setCursor(competitorId: string, nextIndex: number): Promise<void> {
-    await this.query(
-      `INSERT INTO listing_cursors (competitor_id, next_index) VALUES ($1, $2)
-       ON CONFLICT (competitor_id) DO UPDATE SET next_index = excluded.next_index`,
-      [competitorId, nextIndex],
-    );
+    await this.q
+      .insert(listingCursors)
+      .values({ competitorId, nextIndex })
+      .onConflictDoUpdate({ target: listingCursors.competitorId, set: { nextIndex } });
   }
 
   async latestListing(competitorId: string): Promise<Listing | null> {
-    const result = await this.query<Listing>(
-      `SELECT title, tagline, price, description FROM snapshots
-       WHERE competitor_id = $1 ORDER BY id DESC LIMIT 1`,
-      [competitorId],
-    );
-    return result.rows[0] ?? null;
+    const [row] = await this.q
+      .select(listingColumns)
+      .from(snapshots)
+      .where(eq(snapshots.competitorId, competitorId))
+      .orderBy(desc(snapshots.id))
+      .limit(1);
+    return row ?? null;
   }
 
-  async insertSnapshot(input: {
-    competitorId: string;
-    fetchedAt: string;
-    listing: Listing;
-    changed: boolean;
-  }): Promise<number> {
-    const result = await this.query<{ id: number }>(
-      `INSERT INTO snapshots
-        (competitor_id, fetched_at, title, tagline, price, description, changed)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id`,
-      [
-        input.competitorId,
-        input.fetchedAt,
-        input.listing.title,
-        input.listing.tagline,
-        input.listing.price,
-        input.listing.description,
-        input.changed,
-      ],
-    );
-    return Number(result.rows[0]?.id);
+  async insertSnapshot(input: { competitorId: string; fetchedAt: Date; listing: Listing; changed: boolean }): Promise<number> {
+    const [row] = await this.q
+      .insert(snapshots)
+      .values({
+        competitorId: input.competitorId,
+        fetchedAt: input.fetchedAt,
+        ...input.listing,
+        changed: input.changed,
+      })
+      .returning({ id: snapshots.id });
+    return row.id;
   }
 
   async listSnapshots(competitorId: string, maxAttempts = 3): Promise<Snapshot[]> {
-    const result = await this.query<
-      Listing & { fetched_at: Date | string; changed: boolean; summary: string | null; summary_attempts: number }
-    >(
-      `SELECT fetched_at, title, tagline, price, description, changed, summary, summary_attempts
-       FROM snapshots WHERE competitor_id = $1 ORDER BY id DESC`,
-      [competitorId],
-    );
-    return result.rows.map((row) => ({
-      fetchedAt: iso(row.fetched_at),
+    const rows = await this.q
+      .select()
+      .from(snapshots)
+      .where(eq(snapshots.competitorId, competitorId))
+      .orderBy(desc(snapshots.id));
+    return rows.map((row) => ({
+      fetchedAt: row.fetchedAt.toISOString(),
       title: row.title,
       tagline: row.tagline,
       price: row.price,
       description: row.description,
       changed: row.changed,
       summary: row.summary,
-      summaryStatus: statusOf(row.changed, row.summary, row.summary_attempts, maxAttempts),
+      summaryStatus: statusOf(row.changed, row.summary, row.summaryAttempts, maxAttempts),
     }));
   }
 
-  async snapshotForSummary(id: number): Promise<(SnapshotRow & { previous: Listing }) | null> {
-    const result = await this.query<SnapshotRow>(
-      `SELECT id, competitor_id, fetched_at, title, tagline, price, description, changed, summary, summary_attempts
-       FROM snapshots WHERE id = $1`,
-      [id],
-    );
-    const row = result.rows[0];
+  /** A changed snapshot that still needs a summary, with the listing it changed from. */
+  async snapshotForSummary(id: number): Promise<PendingSummary | null> {
+    const [row] = await this.q.select().from(snapshots).where(eq(snapshots.id, id));
     if (!row || !row.changed || row.summary) return null;
-    const previous = await this.query<Listing>(
-      `SELECT title, tagline, price, description FROM snapshots
-       WHERE competitor_id = $1 AND id < $2 ORDER BY id DESC LIMIT 1`,
-      [row.competitor_id, id],
-    );
-    const prior = previous.rows[0];
-    if (!prior) return null;
-    return { ...row, previous: prior };
+    const [previous] = await this.q
+      .select(listingColumns)
+      .from(snapshots)
+      .where(and(eq(snapshots.competitorId, row.competitorId), lt(snapshots.id, id)))
+      .orderBy(desc(snapshots.id))
+      .limit(1);
+    if (!previous) return null;
+    return {
+      id: row.id,
+      competitorId: row.competitorId,
+      summaryAttempts: row.summaryAttempts,
+      title: row.title,
+      tagline: row.tagline,
+      price: row.price,
+      description: row.description,
+      previous,
+    };
   }
 
   async pendingSummaryIds(maxAttempts: number): Promise<number[]> {
-    const result = await this.query<{ id: number }>(
-      `SELECT id FROM snapshots
-       WHERE changed AND summary IS NULL AND summary_attempts < $1
-       ORDER BY id`,
-      [maxAttempts],
-    );
-    return result.rows.map((row) => Number(row.id));
+    const rows = await this.q
+      .select({ id: snapshots.id })
+      .from(snapshots)
+      .where(and(eq(snapshots.changed, true), isNull(snapshots.summary), lt(snapshots.summaryAttempts, maxAttempts)))
+      .orderBy(asc(snapshots.id));
+    return rows.map((row) => row.id);
   }
 
   async saveSummary(id: number, summary: string): Promise<void> {
-    await this.query("UPDATE snapshots SET summary = $1 WHERE id = $2 AND summary IS NULL", [summary, id]);
+    await this.q
+      .update(snapshots)
+      .set({ summary })
+      .where(and(eq(snapshots.id, id), isNull(snapshots.summary)));
   }
 
   async recordSummaryFailure(id: number): Promise<void> {
-    await this.query("UPDATE snapshots SET summary_attempts = summary_attempts + 1 WHERE id = $1", [id]);
+    await this.q
+      .update(snapshots)
+      .set({ summaryAttempts: sql`${snapshots.summaryAttempts} + 1` })
+      .where(eq(snapshots.id, id));
   }
 
-  private async query<T extends pg.QueryResultRow>(sql: string, params: unknown[] = []): Promise<pg.QueryResult<T>> {
-    const client = this.clients.getStore() ?? this.pool;
-    return client.query<T>(sql, params);
+  private get q(): Orm | Tx {
+    return this.transactions.getStore() ?? this.orm;
   }
 
-  /** The database may still be starting (Compose, `npm run dev`), so retry the first connection. */
+  /** Postgres may still be starting (Compose, `npm run dev`), so retry the first connection. */
   private async waitUntilReachable(timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
@@ -197,38 +199,6 @@ export class Db {
       }
     }
   }
-
-  private async migrate(dir: string): Promise<void> {
-    await this.query(
-      `CREATE TABLE IF NOT EXISTS schema_migrations (
-        version INTEGER PRIMARY KEY,
-        applied_at TIMESTAMPTZ NOT NULL
-      )`,
-    );
-    const applied = await this.query<{ version: number }>("SELECT version FROM schema_migrations");
-    const versions = new Set(applied.rows.map((row) => row.version));
-    const files = fs.readdirSync(dir).filter((file) => file.endsWith(".sql")).sort();
-    for (const file of files) {
-      const version = Number(file.slice(0, 3));
-      if (!Number.isInteger(version) || versions.has(version)) continue;
-      const sql = fs.readFileSync(path.join(dir, file), "utf8");
-      const statements = sql
-        .split(";")
-        .map((statement) => statement.trim())
-        .filter((statement) => statement.length > 0);
-      await this.transaction(async () => {
-        for (const statement of statements) await this.query(statement);
-        await this.query("INSERT INTO schema_migrations (version, applied_at) VALUES ($1, $2)", [
-          version,
-          new Date().toISOString(),
-        ]);
-      });
-    }
-  }
-}
-
-function iso(value: Date | string): string {
-  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
 function statusOf(changed: boolean, summary: string | null, attempts: number, maxAttempts: number): SummaryStatus {

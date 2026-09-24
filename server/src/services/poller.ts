@@ -46,7 +46,7 @@ export class Poller {
       if (decision.action === "skip") return null;
       return this.deps.db.insertSnapshot({
         competitorId,
-        fetchedAt: (this.deps.now ?? (() => new Date()))().toISOString(),
+        fetchedAt: (this.deps.now ?? (() => new Date()))(),
         listing,
         changed: decision.changed,
       });
@@ -65,14 +65,14 @@ export class Poller {
 
   private async fill(snapshotId: number): Promise<void> {
     const row = await this.deps.db.snapshotForSummary(snapshotId);
-    if (!row || row.summary_attempts >= this.deps.maxAttempts) return;
+    if (!row || row.summaryAttempts >= this.deps.maxAttempts) return;
     try {
       const summary = await this.deps.summarize(row.previous, row);
       await this.deps.db.saveSummary(snapshotId, summary);
-      this.deps.onUpdate?.(row.competitor_id);
+      this.deps.onUpdate?.(row.competitorId);
     } catch (error) {
       await this.deps.db.recordSummaryFailure(snapshotId);
-      this.deps.onUpdate?.(row.competitor_id);
+      this.deps.onUpdate?.(row.competitorId);
       console.error(`summary failed for snapshot ${snapshotId}:`, error instanceof Error ? error.message : error);
     }
   }

@@ -4,14 +4,14 @@ Tracks competitor listings over time. When a listing changes, the backend asks a
 
 ## Run locally
 
-Requires Node.js 22.13+. No database install is needed.
+Requires Node.js 22.13+ and Docker. PostgreSQL runs in Docker, so nothing else needs installing.
 
 ```bash
 npm install
 npm run dev
 ```
 
-That starts four processes in one terminal: an embedded PostgreSQL on port 5432 ([PGlite](https://pglite.dev), data in `data/pglite`), the mock LLM, the API, and the web app. Stop them with Ctrl+C. Each also runs alone: `npm run dev:db`, `npm run dev:llm`, `npm run dev:server`, `npm run dev:web`. To use your own Postgres instead, skip `dev:db` and set `DATABASE_URL`.
+`npm run dev` starts PostgreSQL 17 in Docker (`npm run db:up`, waits until it is healthy), then runs the mock LLM, the API, and the web app in one terminal. Ctrl+C stops the Node processes; Postgres keeps running until `npm run db:down`. Each Node process also runs alone: `npm run dev:llm`, `npm run dev:server`, `npm run dev:web`. To use another Postgres, set `DATABASE_URL`.
 
 Open http://localhost:5173. Add `acme-crm`, `north-analytics`, or `ferry-pay`. The first snapshot appears immediately; later versions arrive on the poll interval (default 15 seconds).
 
@@ -21,7 +21,15 @@ npm test
 npm run build && STATIC_DIR=web/dist npm start
 ```
 
-Tests live in `server/src/__tests__` and run against a throwaway PGlite database through the real `pg` driver, so SQL and migrations are exercised without a Postgres install.
+Tests live in `server/src/__tests__` and run against the real Postgres from Docker. Each test file resets a separate `competitor_pulse_test` database (override with `TEST_DATABASE_URL`) and applies the migrations, so your dev data is never touched.
+
+### Database
+
+The schema is defined with [Drizzle ORM](https://orm.drizzle.team) in `server/src/db/schema.ts`. Migrations are generated SQL in `server/drizzle/` and are applied automatically when the server starts. After changing the schema:
+
+```bash
+npm run db:generate
+```
 
 ### Docker
 
@@ -43,7 +51,8 @@ LLM_BASE_URL=https://api.openai.com/v1 LLM_API_KEY=sk-... LLM_MODEL=gpt-4o-mini 
 | --- | --- |
 | `PORT` | `3000` |
 | `POLL_INTERVAL_MS` | `15000` (use `900000` for every 15 minutes) |
-| `DATABASE_URL` | `postgres://postgres:postgres@localhost:5432/postgres` |
+| `DATABASE_URL` | `postgres://pulse:pulse@localhost:5432/competitor_pulse` |
+| `TEST_DATABASE_URL` | `postgres://pulse:pulse@localhost:5432/competitor_pulse_test` |
 | `LLM_BASE_URL` | `http://localhost:4001/v1` |
 | `LLM_API_KEY` | `mock` |
 | `LLM_MODEL` | `mock-llm` |
@@ -65,8 +74,9 @@ LLM_BASE_URL=https://api.openai.com/v1 LLM_API_KEY=sk-... LLM_MODEL=gpt-4o-mini 
 - `server/src/http/` — HTTP server, JSON helpers, static files
 - `server/src/controllers/` — `/api/competitors` routes
 - `server/src/services/` — poller, listing source, LLM client
-- `server/src/db/` — PostgreSQL access and the migration runner
-- `server/migrations/` — numbered SQL migrations, applied on startup
+- `server/src/db/` — Drizzle schema and data access
+- `server/drizzle/` — generated SQL migrations, applied on startup
+- `server/src/helpers.ts` — test database setup
 - `server/src/live/` — WebSocket hub
 - `server/src/domain/` — change detection
 - `server/src/__tests__/` — API, LLM client, and poller tests

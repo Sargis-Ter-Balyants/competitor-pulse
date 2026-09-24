@@ -20,7 +20,7 @@ COPY web/package.json web/
 RUN npm ci --omit=dev
 COPY --from=build /app/server/dist server/dist
 COPY --from=build /app/web/dist web/dist
-COPY server/migrations server/migrations
+COPY server/drizzle server/drizzle
 COPY fixtures fixtures
 EXPOSE 3000
 CMD ["node", "server/dist/index.js"]
