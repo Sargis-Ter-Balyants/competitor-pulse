@@ -1,7 +1,7 @@
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { Db } from "./db.js";
+import type { Db } from "../db/db.js";
 
 const LIVE_PATH = "/api/live";
 
@@ -9,8 +9,8 @@ type Client = { socket: WebSocket; watching: string | null };
 
 export type LiveHub = {
   attach(server: Server): void;
-  pushCompetitors(): void;
-  pushSnapshots(competitorIds: readonly string[]): void;
+  pushCompetitors(): Promise<void>;
+  pushSnapshots(competitorIds: readonly string[]): Promise<void>;
   dropCompetitor(competitorId: string): void;
   close(): void;
 };
@@ -28,11 +28,11 @@ export function createLiveHub(options: {
     if (client.socket.readyState === client.socket.OPEN) client.socket.send(JSON.stringify(body));
   }
 
-  function snapshots(competitorId: string) {
+  async function snapshots(competitorId: string) {
     return {
       type: "snapshots",
       competitorId,
-      snapshots: options.db.listSnapshots(competitorId, options.maxAttempts),
+      snapshots: await options.db.listSnapshots(competitorId, options.maxAttempts),
     };
   }
 
@@ -43,37 +43,47 @@ export function createLiveHub(options: {
         const client: Client = { socket, watching: null };
         clients.add(client);
         socket.on("message", (raw) => {
-          let message: { type?: string; competitorId?: string };
-          try {
-            message = JSON.parse(raw.toString()) as { type?: string; competitorId?: string };
-          } catch {
-            send(client, { type: "error", error: "Message must be JSON" });
-            return;
-          }
-          if (message.type === "unsubscribe") {
-            client.watching = null;
-            return;
-          }
-          if (message.type !== "subscribe" || !message.competitorId) return;
-          if (!options.db.hasCompetitor(message.competitorId)) {
-            client.watching = null;
-            send(client, {
-              type: "error",
-              competitorId: message.competitorId,
-              error: `Competitor "${message.competitorId}" is not tracked`,
-            });
-            return;
-          }
-          client.watching = message.competitorId;
-          send(client, snapshots(message.competitorId));
+          (async () => {
+            let message: { type?: string; competitorId?: string };
+            try {
+              message = JSON.parse(raw.toString()) as { type?: string; competitorId?: string };
+            } catch {
+              send(client, { type: "error", error: "Message must be JSON" });
+              return;
+            }
+            if (message.type === "unsubscribe") {
+              client.watching = null;
+              return;
+            }
+            if (message.type !== "subscribe" || !message.competitorId) return;
+            if (!(await options.db.hasCompetitor(message.competitorId))) {
+              client.watching = null;
+              send(client, {
+                type: "error",
+                competitorId: message.competitorId,
+                error: `Competitor "${message.competitorId}" is not tracked`,
+              });
+              return;
+            }
+            client.watching = message.competitorId;
+            send(client, await snapshots(message.competitorId));
+          })().catch((error: unknown) => {
+            console.error("live message failed:", error);
+            send(client, { type: "error", error: "Could not load snapshots" });
+          });
         });
         socket.on("close", () => clients.delete(client));
-        send(client, {
-          type: "connected",
-          pollIntervalMs: options.pollIntervalMs,
-          fixtureIds: options.knownIds,
-          competitors: options.db.listCompetitors(),
-        });
+        options.db
+          .listCompetitors()
+          .then((competitors) => {
+            send(client, {
+              type: "connected",
+              pollIntervalMs: options.pollIntervalMs,
+              fixtureIds: options.knownIds,
+              competitors,
+            });
+          })
+          .catch((error: unknown) => console.error("live connect failed:", error));
       });
 
       server.on("upgrade", (request: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -85,13 +95,13 @@ export function createLiveHub(options: {
         wss.handleUpgrade(request, socket, head, (ws) => wss?.emit("connection", ws, request));
       });
     },
-    pushCompetitors() {
-      const body = { type: "competitors", competitors: options.db.listCompetitors() };
+    async pushCompetitors() {
+      const body = { type: "competitors", competitors: await options.db.listCompetitors() };
       for (const client of clients) send(client, body);
     },
-    pushSnapshots(competitorIds) {
+    async pushSnapshots(competitorIds) {
       for (const competitorId of new Set(competitorIds)) {
-        const body = snapshots(competitorId);
+        const body = await snapshots(competitorId);
         for (const client of clients) {
           if (client.watching === competitorId) send(client, body);
         }

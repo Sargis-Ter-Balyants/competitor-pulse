@@ -1,4 +1,20 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: pulse
+      POSTGRES_PASSWORD: pulse
+      POSTGRES_DB: competitor_pulse
+    ports:
+      - "5432:5432"
+    volumes:
+      - pulse-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulse -d competitor_pulse"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
   mock-llm:
     image: node:24-alpine
     command: node /app/server.mjs
@@ -10,15 +26,17 @@ services:
     ports:
       - "3000:3000"
     environment:
+      DATABASE_URL: postgres://pulse:pulse@postgres:5432/competitor_pulse
       POLL_INTERVAL_MS: 15000
       LLM_BASE_URL: http://mock-llm:4001/v1
       LLM_API_KEY: mock
       LLM_MODEL: mock-llm
       LLM_TIMEOUT_MS: 10000
-    volumes:
-      - pulse-data:/data
     depends_on:
-      - mock-llm
+      postgres:
+        condition: service_healthy
+      mock-llm:
+        condition: service_started
 
 volumes:
-  pulse-data:
+  pulse-db:

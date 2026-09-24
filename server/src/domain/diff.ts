@@ -1,4 +1,4 @@
-import type { Decision, Listing } from "./types.js";
+import type { Decision, Listing } from "../types.js";
 
 const fields = ["title", "tagline", "price", "description"] as const;
 

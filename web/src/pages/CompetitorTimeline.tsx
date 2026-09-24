@@ -44,7 +44,10 @@ export function CompetitorTimeline() {
               <dt>Description</dt>
               <dd>{snapshot.description}</dd>
             </dl>
-            <p className="summary">{summaryText(snapshot)}</p>
+            <details className="summary">
+              <summary>Summary</summary>
+              <p>{summaryText(snapshot)}</p>
+            </details>
           </li>
         ))}
       </ol>

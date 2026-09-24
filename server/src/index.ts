@@ -1,14 +1,14 @@
-import { createApp } from "./api.js";
 import { config } from "./config.js";
-import { Db } from "./db.js";
-import { summarizeChange } from "./llm.js";
-import { createLiveHub } from "./live.js";
-import { Poller } from "./poller.js";
-import { readListings } from "./source.js";
+import { Db } from "./db/db.js";
+import { createApp } from "./http/server.js";
+import { createLiveHub } from "./live/hub.js";
+import { readListings } from "./services/listings.js";
+import { summarizeChange } from "./services/llm.js";
+import { Poller } from "./services/poller.js";
 
 const sequences = readListings(config.listingsPath);
 const knownIds = Object.keys(sequences).sort();
-const db = new Db(config.databasePath, config.migrationsDir);
+const db = await Db.open(config.databaseUrl, config.migrationsDir);
 const live = createLiveHub({
   db,
   knownIds,
@@ -20,7 +20,9 @@ const poller = new Poller({
   sequences,
   summarize: summarizeChange,
   maxAttempts: config.summaryMaxAttempts,
-  onUpdate: (competitorId) => live.pushSnapshots([competitorId]),
+  onUpdate: (competitorId) => {
+    live.pushSnapshots([competitorId]).catch((error: unknown) => console.error("live push failed:", error));
+  },
 });
 
 let ticking = false;
@@ -58,8 +60,7 @@ function shutdown(): void {
   clearInterval(timer);
   live.close();
   server.close();
-  db.close();
-  process.exit(0);
+  void db.close().finally(() => process.exit(0));
 }
 
 process.on("SIGINT", shutdown);

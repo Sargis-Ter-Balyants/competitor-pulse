@@ -1,11 +1,8 @@
 node_modules/
 dist/
 
-# SQLite (default DATABASE_PATH is data/competitor-pulse.db)
+# local Postgres data from `npm run dev`
 data/
-*.db
-*.db-shm
-*.db-wal
 
 .env
 .env.*

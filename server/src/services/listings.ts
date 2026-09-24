@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import type { Db } from "./db.js";
-import type { Listing } from "./types.js";
+import type { Db } from "../db/db.js";
+import type { Listing } from "../types.js";
 
 export function readListings(file: string): Record<string, Listing[]> {
   const parsed: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -11,11 +11,15 @@ export function readListings(file: string): Record<string, Listing[]> {
 }
 
 /** Next canned listing for this competitor. The last version repeats once the sequence ends. */
-export function nextListing(db: Db, sequences: Record<string, Listing[]>, competitorId: string): Listing | null {
+export async function nextListing(
+  db: Db,
+  sequences: Record<string, Listing[]>,
+  competitorId: string,
+): Promise<Listing | null> {
   const sequence = sequences[competitorId];
   if (!sequence?.length) return null;
-  const index = db.cursor(competitorId);
+  const index = await db.cursor(competitorId);
   const listing = sequence[Math.min(index, sequence.length - 1)];
-  db.setCursor(competitorId, Math.min(index + 1, sequence.length));
+  await db.setCursor(competitorId, Math.min(index + 1, sequence.length));
   return { ...listing };
 }

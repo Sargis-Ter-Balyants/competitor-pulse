@@ -1,5 +1,5 @@
-import { config } from "./config.js";
-import type { Listing } from "./types.js";
+import { config } from "../config.js";
+import type { Listing } from "../types.js";
 
 function formatListing(listing: Listing): string {
   return `title: ${listing.title}\ntagline: ${listing.tagline}\nprice: ${listing.price}\ndescription: ${listing.description}`;

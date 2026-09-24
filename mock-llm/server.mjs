@@ -22,9 +22,36 @@ function readJson(req) {
   });
 }
 
+const LISTING_FIELDS = ["title", "tagline", "price", "description"];
+
+function listingFields(block) {
+  const fields = {};
+  for (const line of block.split("\n")) {
+    const match = line.match(/^(title|tagline|price|description): (.*)$/);
+    if (match) fields[match[1]] = match[2];
+  }
+  return fields;
+}
+
+function summarizeChange(userContent) {
+  const marker = "Current listing:";
+  const splitAt = userContent.indexOf(marker);
+  if (splitAt === -1) return null;
+  const previous = listingFields(userContent.slice(0, splitAt));
+  const current = listingFields(userContent.slice(splitAt));
+  const changes = LISTING_FIELDS.flatMap((field) => {
+    if (previous[field] === undefined || current[field] === undefined || previous[field] === current[field]) return [];
+    return [`${field} is now "${current[field]}" (was "${previous[field]}")`];
+  });
+  if (changes.length === 0) return null;
+  return changes.join(". ");
+}
+
 function chatResponse(userContent) {
-  const snippet = userContent.trim().replaceAll("\n", " ").slice(0, 160);
-  const content = `Mock AI summary (not a real model). Based on what you sent: "${snippet}"`;
+  const change = summarizeChange(userContent);
+  const content = change
+    ? `Mock AI summary (not a real model). ${change}.`
+    : `Mock AI summary (not a real model). Based on what you sent: "${userContent.trim().replaceAll("\n", " ").slice(0, 160)}"`;
   const promptTokens = Math.max(1, Math.floor(userContent.length / 4));
   const completionTokens = Math.max(1, Math.floor(content.length / 4));
   return {

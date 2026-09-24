@@ -1,7 +1,7 @@
-import type { Db } from "./db.js";
-import { decide } from "./diff.js";
-import { nextListing } from "./source.js";
-import type { Listing } from "./types.js";
+import type { Db } from "../db/db.js";
+import { decide } from "../domain/diff.js";
+import { nextListing } from "./listings.js";
+import type { Listing } from "../types.js";
 
 export type PollerDeps = {
   db: Db;
@@ -19,16 +19,16 @@ export class Poller {
   constructor(private readonly deps: PollerDeps) {}
 
   async pollAll(): Promise<void> {
-    for (const competitor of this.deps.db.listCompetitors()) this.captureAndNotify(competitor.id);
-    for (const id of this.deps.db.pendingSummaryIds(this.deps.maxAttempts)) this.schedule(id);
+    for (const competitor of await this.deps.db.listCompetitors()) await this.captureAndNotify(competitor.id);
+    for (const id of await this.deps.db.pendingSummaryIds(this.deps.maxAttempts)) this.schedule(id);
   }
 
-  pollOne(competitorId: string): void {
-    this.captureAndNotify(competitorId);
+  pollOne(competitorId: string): Promise<void> {
+    return this.captureAndNotify(competitorId);
   }
 
-  private captureAndNotify(competitorId: string): void {
-    const snapshotId = this.capture(competitorId);
+  private async captureAndNotify(competitorId: string): Promise<void> {
+    const snapshotId = await this.capture(competitorId);
     if (snapshotId !== null) this.deps.onUpdate?.(competitorId);
     this.schedule(snapshotId);
   }
@@ -37,12 +37,12 @@ export class Poller {
     await Promise.all([...this.tasks]);
   }
 
-  private capture(competitorId: string): number | null {
-    return this.deps.db.transaction(() => {
-      if (!this.deps.db.hasCompetitor(competitorId)) return null;
-      const listing = nextListing(this.deps.db, this.deps.sequences, competitorId);
+  private capture(competitorId: string): Promise<number | null> {
+    return this.deps.db.transaction(async () => {
+      if (!(await this.deps.db.hasCompetitor(competitorId))) return null;
+      const listing = await nextListing(this.deps.db, this.deps.sequences, competitorId);
       if (!listing) return null;
-      const decision = decide(this.deps.db.latestListing(competitorId), listing);
+      const decision = decide(await this.deps.db.latestListing(competitorId), listing);
       if (decision.action === "skip") return null;
       return this.deps.db.insertSnapshot({
         competitorId,
@@ -64,14 +64,14 @@ export class Poller {
   }
 
   private async fill(snapshotId: number): Promise<void> {
-    const row = this.deps.db.snapshotForSummary(snapshotId);
+    const row = await this.deps.db.snapshotForSummary(snapshotId);
     if (!row || row.summary_attempts >= this.deps.maxAttempts) return;
     try {
       const summary = await this.deps.summarize(row.previous, row);
-      this.deps.db.saveSummary(snapshotId, summary);
+      await this.deps.db.saveSummary(snapshotId, summary);
       this.deps.onUpdate?.(row.competitor_id);
     } catch (error) {
-      this.deps.db.recordSummaryFailure(snapshotId);
+      await this.deps.db.recordSummaryFailure(snapshotId);
       this.deps.onUpdate?.(row.competitor_id);
       console.error(`summary failed for snapshot ${snapshotId}:`, error instanceof Error ? error.message : error);
     }

@@ -6,10 +6,13 @@
     "web"
   ],
   "scripts": {
-    "dev": "concurrently -n llm,api,web -c cyan,green,magenta \"node mock-llm/server.mjs\" \"npm run dev:server\" \"npm run dev:web\"",
+    "dev": "concurrently -n db,llm,api,web -c yellow,cyan,green,magenta \"npm run dev:db\" \"npm run dev:llm\" \"npm run dev:server\" \"npm run dev:web\"",
+    "dev:db": "mkdir -p data && pglite-server --db=data/pglite --port=5432 --max-connections=10",
+    "dev:llm": "node mock-llm/server.mjs",
     "dev:server": "npm run dev -w server",
     "dev:web": "npm run dev -w web",
     "test": "npm test -w server",
+    "typecheck": "tsc -p server --noEmit && tsc -p web --noEmit",
     "build": "npm run build -w web && npm run build -w server",
     "start": "npm start -w server"
   },

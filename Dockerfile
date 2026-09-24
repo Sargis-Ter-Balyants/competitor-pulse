@@ -13,7 +13,6 @@ FROM node:24-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 ENV STATIC_DIR=/app/web/dist
-ENV DATABASE_PATH=/data/competitor-pulse.db
 ENV LISTINGS_PATH=/app/fixtures/listings.json
 COPY package.json package-lock.json ./
 COPY server/package.json server/
