@@ -6,7 +6,7 @@ import { createApp } from "../http/server.js";
 import type { LiveHub } from "../live/hub.js";
 import { Poller } from "../services/poller.js";
 import type { Listing } from "../types.js";
-import { openTestDb } from "./helpers.js";
+import { openTestDb } from "../helpers.js";
 
 const v1: Listing = { title: "Acme", tagline: "Simple", price: "$29/mo", description: "Leads." };
 const v2: Listing = { title: "Acme", tagline: "Simple", price: "$39/mo", description: "Leads." };

@@ -1,8 +1,8 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import { ErrorBoundary } from "../components/ErrorBoundary";
-import { LiveProvider, useLive } from "../live/LiveProvider";
-import { CompetitorList } from "../pages/CompetitorList";
-import { CompetitorTimeline } from "../pages/CompetitorTimeline";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { LiveProvider, useLive } from "./live/LiveProvider";
+import { CompetitorList } from "./pages/CompetitorList";
+import { CompetitorTimeline } from "./pages/CompetitorTimeline";
 
 export function App() {
   return (

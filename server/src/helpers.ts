@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { PGLiteSocketServer } from "@electric-sql/pglite-socket";
-import { Db } from "../db/db.js";
+import { Db } from "./db/db.js";
 
 const migrationsDir = path.join(fileURLToPath(new URL(".", import.meta.url)), "../../migrations");
 
