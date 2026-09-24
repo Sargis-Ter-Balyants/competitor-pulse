@@ -1,0 +1,143 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  line-height: 1.45;
+  background: #f4f5f7;
+  color: #1c1e21;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 28px 16px 64px;
+}
+
+.site-header h1 {
+  margin: 0 0 4px;
+  font-size: 1.7rem;
+}
+
+.site-header p,
+.muted {
+  color: #5c6570;
+}
+
+h2 {
+  margin-top: 0;
+}
+
+a {
+  color: #0b57d0;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #d9dde3;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.add-form label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.add-row {
+  display: flex;
+  gap: 8px;
+}
+
+.add-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+input,
+button {
+  font: inherit;
+  padding: 8px 12px;
+}
+
+button {
+  cursor: pointer;
+}
+
+.competitor-list,
+.timeline {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0;
+}
+
+.competitor-list li,
+.timeline li {
+  margin-bottom: 12px;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 4px 12px;
+  margin: 12px 0;
+}
+
+dt {
+  color: #5c6570;
+}
+
+dd {
+  margin: 0;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.78rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e7e9ee;
+  white-space: nowrap;
+}
+
+.badge.changed {
+  background: #d9f2e3;
+}
+
+.summary {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px solid #eceff3;
+  overflow-wrap: anywhere;
+}
+
+.error {
+  color: #9b1c1c;
+}
+
+@media (max-width: 560px) {
+  .add-row,
+  .row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  dl {
+    grid-template-columns: 1fr;
+  }
+}

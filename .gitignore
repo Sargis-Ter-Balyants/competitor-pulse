@@ -1,0 +1,17 @@
+node_modules/
+dist/
+
+# SQLite (default DATABASE_PATH is data/competitor-pulse.db)
+data/
+*.db
+*.db-shm
+*.db-wal
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+*.log
+*.tsbuildinfo
+coverage/
